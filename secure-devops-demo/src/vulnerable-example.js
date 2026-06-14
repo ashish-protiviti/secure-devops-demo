@@ -36,7 +36,7 @@ const config_VULNERABLE = {
 };
 
 const config = {
-  githubToken: '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'
+  githubToken: ''
 }
 
 // FIXED version:
