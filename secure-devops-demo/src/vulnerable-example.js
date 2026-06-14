@@ -31,7 +31,7 @@ async function getUserByName_SAFE(username) {
 const config_VULNERABLE = {
   // BAD: Hardcoded API key - will be caught by secret scanning
   apiKey: 'sk-live-xK92mNpQr7vL4wT8aB3cD6eF1gH0iJ5',
-  dbPassword: 'SuperSecret@DB2024!',
+  dbPassword: 'SuperSecret@DB2024!A',
   jwtSecret: 'my-super-secret-jwt-key-12345'
 };
 
