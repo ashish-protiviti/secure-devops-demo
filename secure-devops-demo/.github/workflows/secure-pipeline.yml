@@ -1,0 +1,173 @@
+# ============================================================
+# GitHub Actions: Secure CI/CD Pipeline
+# DEMO: This workflow shows all security gates in order
+# Each job maps to a specific Secure DevOps demo moment
+# ============================================================
+
+name: Secure CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # Required for CodeQL to upload results
+  pull-requests: write     # Required for PR annotations
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────
+  # DEMO MOMENT #6: Secret Scanning (pre-commit push protection
+  # is configured in GitHub repo settings, this step shows
+  # truffleHog as an in-pipeline scan for any secrets in code)
+  # ─────────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for accurate scanning
+
+      - name: Run TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  # ─────────────────────────────────────────────────────────
+  # DEMO MOMENT #7: Dependency Review
+  # Blocks PRs that introduce vulnerable dependencies
+  # ─────────────────────────────────────────────────────────
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, LGPL-2.1
+
+  # ─────────────────────────────────────────────────────────
+  # Build and Unit Test (standard quality gate)
+  # ─────────────────────────────────────────────────────────
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    needs: [secret-scan]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests with coverage
+        run: npm test -- --coverage --coverageReporters=lcov
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          NODE_ENV: test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+  # ─────────────────────────────────────────────────────────
+  # DEMO MOMENT #8: CodeQL Static Application Security Testing
+  # Detects SQL injection, XSS, path traversal, and more
+  # ─────────────────────────────────────────────────────────
+  codeql-analysis:
+    name: CodeQL SAST
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          queries: security-extended  # Runs deeper security query suite
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript'
+          upload: true  # Uploads results to GitHub Security tab
+
+  # ─────────────────────────────────────────────────────────
+  # DEMO MOMENT #10: SBOM Generation (Supply Chain Security)
+  # Generates a Software Bill of Materials for compliance
+  # ─────────────────────────────────────────────────────────
+  sbom-generation:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./
+          format: spdx-json
+          artifact-name: sbom-${{ github.sha }}.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-report
+          path: sbom-*.spdx.json
+
+  # ─────────────────────────────────────────────────────────
+  # Deploy (only runs if ALL security gates pass)
+  # DEMO MOMENT #9: Branch protection ensures this never
+  # runs unless all above jobs succeed
+  # ─────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [codeql-analysis, dependency-review, sbom-generation]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: https://leave-service-staging.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: leave-service-staging
+          publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
+
+      - name: Post deployment health check
+        run: |
+          sleep 30
+          curl -f https://leave-service-staging.example.com/health || exit 1
