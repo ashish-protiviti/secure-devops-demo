@@ -35,6 +35,10 @@ const config_VULNERABLE = {
   jwtSecret: 'password'
 };
 
+const config = {
+  githubToken: 'ghp_dshdjsdushuuuAHjksksdjskdjsiii'
+}
+
 // FIXED version:
 const config_SAFE = {
   // GOOD: Loaded from environment variables
